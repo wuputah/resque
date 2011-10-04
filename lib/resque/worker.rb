@@ -128,7 +128,7 @@ module Resque
 
       keepalive_thread = Thread.new {
         loop do
-          redis.set(self, Time.now)
+          redis.set(self, self)
           redis.expire(self, interval)
           sleep interval
         end
@@ -362,7 +362,7 @@ module Resque
     # lifecycle on startup.
     def register_worker
       redis.sadd(:workers, self)
-      redis.set(self, Time.now)
+      redis.set(self, self)
       redis.expire(self, 10)
       started!
     end
