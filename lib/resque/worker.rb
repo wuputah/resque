@@ -123,6 +123,13 @@ module Resque
       $0 = "resque: Starting"
       startup
 
+      keepalive_thread = Thread.new {
+        loop do
+          redis.set(self, Time.now)
+          redis.expire(self, interval)
+          sleep interval
+        end
+      }
       loop do
         break if shutdown?
 
@@ -340,9 +347,7 @@ module Resque
       all_workers = Worker.all
       known_workers = worker_pids unless all_workers.empty?
       all_workers.each do |worker|
-        host, pid, queues = worker.id.split(':')
-        next unless host == hostname
-        next if known_workers.include?(pid)
+        next if redis.get(worker)
         log! "Pruning dead worker: #{worker}"
         worker.unregister_worker
       end
@@ -352,6 +357,8 @@ module Resque
     # lifecycle on startup.
     def register_worker
       redis.sadd(:workers, self)
+      redis.set(self, Time.now)
+      redis.expire(self, 10)
       started!
     end
 
