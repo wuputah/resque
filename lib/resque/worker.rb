@@ -349,7 +349,7 @@ module Resque
       dead_workers.each do |worker_id|
         worker = Worker.find(worker_id)
         log! "Pruning dead worker: #{worker}"
-        worker.unregister_worker
+        worker.unregister_worker if worker
       end
     end
 
