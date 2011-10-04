@@ -91,7 +91,8 @@ module Resque
     # in alphabetical order. Queues can be dynamically added or
     # removed without needing to restart workers using this method.
     def initialize(*queues)
-      @queues = queues.map { |queue| queue.to_s.strip }
+      @queues           = queues.map { |queue| queue.to_s.strip }
+      @keepalive_thread = nil
       validate_queues
     end
 
@@ -103,6 +104,18 @@ module Resque
       if @queues.nil? || @queues.empty?
         raise NoQueueError.new("Please give each worker at least one queue.")
       end
+    end
+
+    # This creates the keepalive therad that lets redis know the
+    # worker is still alive.
+    def setup_keepalive_thread(interval)
+      @keepalive_thread = Thread.new {
+        loop do
+          redis.set(self, self)
+          redis.expire(self, interval)
+          sleep interval
+        end
+      }
     end
 
     # This is the main workhorse method. Called on a Worker instance,
@@ -124,15 +137,8 @@ module Resque
     def work(interval = 5.0, &block)
       interval = Float(interval)
       $0 = "resque: Starting"
-      startup
+      startup(interval)
 
-      keepalive_thread = Thread.new {
-        loop do
-          redis.set(self, self)
-          redis.expire(self, interval)
-          sleep interval
-        end
-      }
       loop do
         break if shutdown?
 
@@ -242,7 +248,7 @@ module Resque
     end
 
     # Runs all the methods needed when a worker begins its lifecycle.
-    def startup
+    def startup(interval)
       enable_gc_optimizations
       register_signal_handlers
       prune_dead_workers
@@ -362,8 +368,6 @@ module Resque
     # lifecycle on startup.
     def register_worker
       redis.sadd(:workers, self)
-      redis.set(self, self)
-      redis.expire(self, 10)
       started!
     end
 
