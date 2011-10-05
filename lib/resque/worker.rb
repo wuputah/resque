@@ -351,6 +351,8 @@ module Resque
     # environment, we can determine if Redis is old and clean it up a bit.
     def self.prune_dead_workers
       all_workers  = Array(redis.smembers(:workers))
+      return if all_workers.empty?
+
       dead_workers = all_workers - redis.mget(*all_workers)
       dead_workers.each do |worker_id|
         worker = Worker.find(worker_id)
