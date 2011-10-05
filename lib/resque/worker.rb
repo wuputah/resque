@@ -354,7 +354,6 @@ module Resque
       dead_workers = all_workers - redis.mget(*all_workers)
       dead_workers.each do |worker_id|
         worker = Worker.find(worker_id)
-        log! "Pruning dead worker: #{worker}"
         worker.unregister_worker if worker
       end
     end
