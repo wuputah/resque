@@ -394,6 +394,8 @@ module Resque
 
       Stat.clear("processed:#{self}")
       Stat.clear("failed:#{self}")
+
+      @keepalive_thread.exit if @keepalive_thread
     end
 
     # Given a job, tells Redis we're working on it. Useful for seeing
