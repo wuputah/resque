@@ -110,7 +110,7 @@ module Resque
         loop do
           redis.multi do
             redis.set(self, self)
-            redis.expire(self, interval + 10)
+            redis.expire(self, interval.to_i + 10)
           end
           log! "Heartbeat for #{self}"
           sleep interval
