@@ -108,8 +108,10 @@ module Resque
     def setup_keepalive_thread(interval)
       @keepalive_thread = Thread.new {
         loop do
-          redis.set(self, self)
-          redis.expire(self, interval)
+          redis.multi do
+            redis.set(self, self)
+            redis.expire(self, interval)
+          end
           sleep interval
         end
       }
