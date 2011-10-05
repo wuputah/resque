@@ -112,7 +112,7 @@ module Resque
             redis.set(self, self)
             redis.expire(self, interval.to_i + 10)
           end
-          log! "Heartbeat for #{self}"
+          log! "Heartbeat for #{self} | ttl: #{redis.ttl(self)}"
           sleep interval
         end
       }
