@@ -248,7 +248,7 @@ module Resque
     def startup(interval)
       enable_gc_optimizations
       register_signal_handlers
-      prune_dead_workers
+      Worker.prune_dead_workers
       run_hook :before_first_fork
       register_worker
 
@@ -349,7 +349,7 @@ module Resque
     #
     # By checking the current Redis state against the actual
     # environment, we can determine if Redis is old and clean it up a bit.
-    def prune_dead_workers
+    def self.prune_dead_workers
       all_workers  = Array(redis.smembers(:workers))
       dead_workers = all_workers - redis.mget(*all_workers)
       dead_workers.each do |worker_id|
