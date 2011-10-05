@@ -254,6 +254,7 @@ module Resque
       Worker.prune_dead_workers
       run_hook :before_first_fork
       register_worker
+      setup_keepalive_thread(interval)
 
       # Fix buffering so we can `rake resque:work > resque.log` and
       # get output from the child in there.
