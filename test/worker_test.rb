@@ -279,6 +279,9 @@ context "Resque::Worker" do
 
     assert_equal 2, Resque.workers.size
 
+    # simulate dead workers
+    Resque.redis.del(workerA, workerB)
+
     # then we prune them
     @worker.work(0) do
       assert_equal 1, Resque.workers.size
