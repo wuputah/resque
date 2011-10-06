@@ -336,7 +336,6 @@ module Resque
 
   # A shortcut to Worker.all
   def workers
-    Worker.prune_dead_workers
     Worker.all
   end
 

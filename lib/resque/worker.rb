@@ -106,8 +106,8 @@ module Resque
       end
     end
 
-    # This creates the keepalive therad that lets redis know the
-    # worker is still alive.
+    # This creates the keepalive thread that lets redis know the
+    # worker is still alive. It also prunes workers.
     def setup_keepalive_thread
       @keepalive_thread = Thread.new {
         loop do
@@ -117,6 +117,17 @@ module Resque
             redis.expire(self, KEEPALIVE_EXPIRE)
           end
           log! "Heartbeat for #{self} | ttl: #{redis.ttl(self)}"
+
+          dont_prune = nil
+          redis.multi do
+            dont_prune = redis.get(:last_prune)
+            unless dont_prune
+              redis.set(:last_prune, Time.now)
+              redis.expire(self, KEEPALIVE_INTERVAL - 5)
+            end
+          end
+          # don't need to do this in a transaction
+          Worker.prune_dead_workers unless dont_prune
         end
       }
     end
