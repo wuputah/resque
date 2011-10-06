@@ -10,6 +10,9 @@ module Resque
     include Resque::Helpers
     extend Resque::Helpers
 
+    KEEPALIVE_INTERVAL = 25
+    KEEPALIVE_EXPIRE   = 60
+
     # Whether the worker should log basic info to STDOUT
     attr_accessor :verbose
 
@@ -108,15 +111,15 @@ module Resque
 
     # This creates the keepalive therad that lets redis know the
     # worker is still alive.
-    def setup_keepalive_thread(interval)
+    def setup_keepalive_thread
       @keepalive_thread = Thread.new {
         loop do
+          sleep KEEPALIVE_INTERVAL
           redis.multi do
             redis.set(self, self)
-            redis.expire(self, interval.to_i + 5)
+            redis.expire(self, KEEPALIVE_EXPIRE)
           end
           log! "Heartbeat for #{self} | ttl: #{redis.ttl(self)}"
-          sleep interval
         end
       }
     end
@@ -140,7 +143,7 @@ module Resque
     def work(interval = 5.0, &block)
       interval = Float(interval)
       $0 = "resque: Starting"
-      startup(interval)
+      startup
 
       loop do
         break if shutdown?
@@ -251,13 +254,13 @@ module Resque
     end
 
     # Runs all the methods needed when a worker begins its lifecycle.
-    def startup(interval)
+    def startup
       enable_gc_optimizations
       register_signal_handlers
       Worker.prune_dead_workers
       run_hook :before_first_fork
       register_worker
-      setup_keepalive_thread(interval)
+      setup_keepalive_thread
 
       # Fix buffering so we can `rake resque:work > resque.log` and
       # get output from the child in there.
@@ -372,6 +375,8 @@ module Resque
     # Registers ourself as a worker. Useful when entering the worker
     # lifecycle on startup.
     def register_worker
+      redis.set(self, self)
+      redis.expire(self, KEEPALIVE_EXPIRE)
       redis.sadd(:workers, self)
       started!
     end
