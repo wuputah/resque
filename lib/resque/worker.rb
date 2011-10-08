@@ -123,16 +123,16 @@ module Resque
           end
           log! "Heartbeat for #{self} | ttl: #{redis.ttl(self)}"
 
-          dont_prune = nil
-          redis.multi do
-            dont_prune = redis.get(:last_prune)
-            unless dont_prune
+          # if last_prune changes, dont exec the transaction
+          redis.watch :last_prune
+          unless dont_prune = redis.get(:last_prune)
+            tx_succeeded = redis.multi do
               redis.set(:last_prune, Time.now)
               redis.expire(self, KEEPALIVE_INTERVAL - 5)
             end
           end
           # don't need to do this in a transaction
-          Worker.prune_dead_workers unless dont_prune
+          Worker.prune_dead_workers if !dont_prune && tx_succeeded
           sleep KEEPALIVE_INTERVAL
         end
       }
