@@ -18,7 +18,7 @@ module Resque
 
     # Whether the worker should log lots of info to STDOUT
     attr_accessor  :very_verbose
-    
+
     # Whether the worker reverses the TERM and QUIT signals for compatibly reasons
     attr_accessor :reverse_signals
 
@@ -113,8 +113,10 @@ module Resque
     # worker is still alive. It also prunes workers.
     def setup_keepalive_thread
       @keepalive_thread = Thread.new {
+        # stagger keepalive thread to avoid all workers checking
+        # at the same time
+        sleep(KEEPALIVE_INTERVAL * Kernel.rand)
         loop do
-          sleep KEEPALIVE_INTERVAL
           redis.multi do
             redis.set(self, self)
             redis.expire(self, KEEPALIVE_EXPIRE)
@@ -131,6 +133,7 @@ module Resque
           end
           # don't need to do this in a transaction
           Worker.prune_dead_workers unless dont_prune
+          sleep KEEPALIVE_INTERVAL
         end
       }
     end
@@ -294,7 +297,7 @@ module Resque
     # USR1: Kill the forked child immediately, continue processing jobs.
     # USR2: Don't process any new jobs
     # CONT: Start processing jobs again after a USR2
-    # 
+    #
     # When `reverse_signals` is set to true the TERM and QUIT signals are swapped
     def register_signal_handlers
       trap(reverse_signals ? 'QUIT' : 'TERM') { shutdown!  }
