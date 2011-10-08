@@ -127,7 +127,7 @@ module Resque
           redis.watch :last_prune
           unless dont_prune = redis.get(:last_prune)
             tx_succeeded = redis.multi do
-              redis.set(:last_prune, Time.now)
+              redis.set(:last_prune, Time.now.to_i)
               redis.expire(self, KEEPALIVE_INTERVAL - 5)
             end
           end
