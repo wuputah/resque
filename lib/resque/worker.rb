@@ -125,14 +125,14 @@ module Resque
 
           # if last_prune changes, dont exec the transaction
           redis.watch :last_prune
-          unless dont_prune = redis.get(:last_prune)
-            tx_succeeded = redis.multi do
+          if prune = !redis.get(:last_prune)
+            prune = redis.multi do
               redis.set(:last_prune, Time.now.to_i)
               redis.expire(self, KEEPALIVE_INTERVAL - 5)
             end
           end
           # don't need to do this in a transaction
-          Worker.prune_dead_workers if !dont_prune && tx_succeeded
+          Worker.prune_dead_workers if prune
           sleep KEEPALIVE_INTERVAL
         end
       }
