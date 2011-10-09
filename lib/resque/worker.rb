@@ -333,18 +333,26 @@ module Resque
       @shutdown
     end
 
-    # Kills the forked child immediately, without remorse. The job it
-    # is processing will not be completed.
+    # Kills the forked child immediately with minimal remorse. The job it
+    # is processing will not be completed. Send the child a TERM signal,
+    # wait 5 seconds, and then a KILL signal if it has not quit
     def kill_child
       if @child
-        log! "Killing child at #{@child}"
-        if system("ps -o pid,state -p #{@child}")
-          Process.kill("KILL", @child) rescue nil
+        unless Process.waitpid(@child, Process::WNOHANG)
+          log! "Sending TERM signal to child #{@child}"
+          Process.kill("TERM", @child)
+          50.times do |i|
+            sleep(0.1)
+            return if Process.waitpid(@child, Process::WNOHANG)
+          end
+          log! "Sending KILL signal to child #{@child}"
+          Process.kill("KILL", @child)
         else
-          log! "Child #{@child} not found, restarting."
-          shutdown
+          log! "Child #{@child} already quit."
         end
       end
+    rescue SystemCallError
+      log! "Child #{@child} already quit and reaped."
     end
 
     # are we paused?
