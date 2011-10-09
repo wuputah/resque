@@ -10,11 +10,17 @@ module Resque
     include Resque::Helpers
     extend Resque::Helpers
 
+    KEEPALIVE_INTERVAL = (ENV['RESQUE_KEEPALIVE_INTERVAL'] || 25).to_i
+    KEEPALIVE_EXPIRE   = (ENV['RESQUE_KEEPALIVE_EXPIRE']   || 60).to_i
+
     # Whether the worker should log basic info to STDOUT
     attr_accessor :verbose
 
     # Whether the worker should log lots of info to STDOUT
     attr_accessor  :very_verbose
+
+    # Whether the worker reverses the TERM and QUIT signals for compatibly reasons
+    attr_accessor :reverse_signals
 
     # Boolean indicating whether this worker can or can not fork.
     # Automatically set if a fork(2) fails.
@@ -88,7 +94,8 @@ module Resque
     # in alphabetical order. Queues can be dynamically added or
     # removed without needing to restart workers using this method.
     def initialize(*queues)
-      @queues = queues.map { |queue| queue.to_s.strip }
+      @queues           = queues.map { |queue| queue.to_s.strip }
+      @keepalive_thread = nil
       validate_queues
     end
 
@@ -100,6 +107,35 @@ module Resque
       if @queues.nil? || @queues.empty?
         raise NoQueueError.new("Please give each worker at least one queue.")
       end
+    end
+
+    # This creates the keepalive thread that lets redis know the
+    # worker is still alive. It also prunes workers.
+    def setup_keepalive_thread
+      @keepalive_thread = Thread.new {
+        # stagger keepalive thread to avoid all workers checking
+        # at the same time
+        sleep(KEEPALIVE_INTERVAL * Kernel.rand)
+        loop do
+          redis.multi do
+            redis.set(self, self)
+            redis.expire(self, KEEPALIVE_EXPIRE)
+          end
+          log! "Heartbeat for #{self} | ttl: #{redis.ttl(self)}"
+
+          # if last_prune changes, dont exec the transaction
+          redis.watch :last_prune
+          if prune = !redis.get(:last_prune)
+            prune = redis.multi do
+              redis.set(:last_prune, Time.now.to_i)
+              redis.expire(self, KEEPALIVE_INTERVAL - 5)
+            end
+          end
+          # don't need to do this in a transaction
+          Worker.prune_dead_workers if prune
+          sleep KEEPALIVE_INTERVAL
+        end
+      }
     end
 
     # This is the main workhorse method. Called on a Worker instance,
@@ -235,9 +271,10 @@ module Resque
     def startup
       enable_gc_optimizations
       register_signal_handlers
-      prune_dead_workers
+      Worker.prune_dead_workers
       run_hook :before_first_fork
       register_worker
+      setup_keepalive_thread
 
       # Fix buffering so we can `rake resque:work > resque.log` and
       # get output from the child in there.
@@ -260,12 +297,14 @@ module Resque
     # USR1: Kill the forked child immediately, continue processing jobs.
     # USR2: Don't process any new jobs
     # CONT: Start processing jobs again after a USR2
+    #
+    # When `reverse_signals` is set to true the TERM and QUIT signals are swapped
     def register_signal_handlers
-      trap('TERM') { shutdown!  }
+      trap(reverse_signals ? 'QUIT' : 'TERM') { shutdown!  }
       trap('INT')  { shutdown!  }
 
       begin
-        trap('QUIT') { shutdown   }
+        trap(reverse_signals ? 'TERM' : 'QUIT') { shutdown   }
         trap('USR1') { kill_child }
         trap('USR2') { pause_processing }
         trap('CONT') { unpause_processing }
@@ -273,7 +312,7 @@ module Resque
         warn "Signals QUIT, USR1, USR2, and/or CONT not supported."
       end
 
-      log! "Registered signals"
+      log! "Registered #{reverse_signals ? 'reversed ' : ''}signals"
     end
 
     # Schedule this worker for shutdown. Will finish processing the
@@ -336,21 +375,22 @@ module Resque
     #
     # By checking the current Redis state against the actual
     # environment, we can determine if Redis is old and clean it up a bit.
-    def prune_dead_workers
-      all_workers = Worker.all
-      known_workers = worker_pids unless all_workers.empty?
-      all_workers.each do |worker|
-        host, pid, queues = worker.id.split(':')
-        next unless host == hostname
-        next if known_workers.include?(pid)
-        log! "Pruning dead worker: #{worker}"
-        worker.unregister_worker
+    def self.prune_dead_workers
+      all_workers  = Array(redis.smembers(:workers))
+      return if all_workers.empty?
+
+      dead_workers = all_workers - redis.mget(*all_workers)
+      dead_workers.each do |worker_id|
+        worker = Worker.find(worker_id)
+        worker.unregister_worker if worker
       end
     end
 
     # Registers ourself as a worker. Useful when entering the worker
     # lifecycle on startup.
     def register_worker
+      redis.set(self, self)
+      redis.expire(self, KEEPALIVE_EXPIRE)
       redis.sadd(:workers, self)
       started!
     end
@@ -383,6 +423,8 @@ module Resque
 
       Stat.clear("processed:#{self}")
       Stat.clear("failed:#{self}")
+
+      @keepalive_thread.exit if @keepalive_thread
     end
 
     # Given a job, tells Redis we're working on it. Useful for seeing
