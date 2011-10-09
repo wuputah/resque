@@ -10,8 +10,8 @@ module Resque
     include Resque::Helpers
     extend Resque::Helpers
 
-    KEEPALIVE_INTERVAL = 25
-    KEEPALIVE_EXPIRE   = 60
+    KEEPALIVE_INTERVAL = (ENV['RESQUE_KEEPALIVE_INTERVAL'] || 25).to_i
+    KEEPALIVE_EXPIRE   = (ENV['RESQUE_KEEPALIVE_EXPIRE']   || 60).to_i
 
     # Whether the worker should log basic info to STDOUT
     attr_accessor :verbose
