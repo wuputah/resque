@@ -125,17 +125,24 @@ module Resque
 
           # if last_prune changes, dont exec the transaction
           redis.watch :last_prune
-          if prune = !redis.get(:last_prune)
-            prune = redis.multi do
-              redis.set(:last_prune, Time.now.to_i)
-              redis.expire(self, KEEPALIVE_INTERVAL - 5)
+          unless redis.get(:last_prune)
+            if set_last_prune
+              log! "Pruning dead workers"
+              Worker.prune_dead_workers
             end
           end
-          # don't need to do this in a transaction
-          Worker.prune_dead_workers if prune
           sleep KEEPALIVE_INTERVAL
         end
       }
+    end
+
+    # Execute the transaction for last_prune. Placing this in its own method
+    # simplifies the logic of the keepalive thread.
+    def set_last_prune
+      redis.multi do
+        redis.set(:last_prune, Time.now.to_i)
+        redis.expire(:last_prune, KEEPALIVE_INTERVAL - 5)
+      end
     end
 
     # This is the main workhorse method. Called on a Worker instance,
