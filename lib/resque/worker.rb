@@ -123,26 +123,31 @@ module Resque
           end
           log! "Heartbeat for #{self} | ttl: #{redis.ttl(self)}"
 
-          # if last_prune changes, dont exec the transaction
-          redis.watch :last_prune
-          unless redis.get(:last_prune)
-            if set_last_prune
-              log! "Pruning dead workers"
-              Worker.prune_dead_workers
-            end
+          if set_last_prune
+            log! "Pruning dead workers"
+            Worker.prune_dead_workers
           end
           sleep KEEPALIVE_INTERVAL
         end
       }
     end
 
-    # Execute the transaction for last_prune. Placing this in its own method
-    # simplifies the logic of the keepalive thread.
+    # Try to be the only worker to set last_prune. Returns true if we were able
+    # to, false otherwise.
+    #
+    # We don't execute the transaction at all if the key exists ahead of time.
+    # If it doesnt exist, we set it only if it still does not exist and expire
+    # it in a transaction, which ensures the expiration is always set.  Success
+    # is determined by whether we were responsible for setting the key.
+    # Multiple workers setting the expiration at roughly the same time is not a
+    # concern.
     def set_last_prune
-      redis.multi do
-        redis.set(:last_prune, Time.now.to_i)
+      return false if redis.get(:last_prune)
+      transaction_results = redis.multi do
+        redis.setnx(:last_prune, Time.now.to_i)
         redis.expire(:last_prune, KEEPALIVE_INTERVAL - 5)
       end
+      transaction_results.first == 1
     end
 
     # This is the main workhorse method. Called on a Worker instance,
